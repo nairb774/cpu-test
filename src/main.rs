@@ -1,3 +1,4 @@
+use std::env;
 use std::mem;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::AtomicUsize;
@@ -32,14 +33,22 @@ fn run_rand(iteration_counter: &AtomicUsize, mem: &Vec<Slot>, finish: &Instant) 
     }
 }
 
-fn main() {
+fn parse_env<F>(name: &str, default: &str) -> Result<F, F::Err>
+where
+    F: std::str::FromStr,
+{
+    let value = env::var(name).unwrap_or_else(|_| default.to_string());
+    info!("{name}={value}");
+    value.parse()
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    info!("Starting...");
+    let block_size: usize = parse_env("BLOCK_SIZE", "1")?;
+    let thread_count: usize = parse_env("THREAD_COUNT", "1")?;
+    let validation_seconds: u64 = parse_env("VALIDATION_SECONDS", "60")?;
 
-    const BLOCK: usize = 16 << 30;
-    const THREAD_COUNT: usize = 32;
-
-    let mut mem = Vec::with_capacity(BLOCK / mem::size_of::<Slot>());
+    let mut mem = Vec::with_capacity((block_size << 30) / mem::size_of::<Slot>());
     for idx in 0..mem.capacity() {
         mem.push(Slot {
             atomic: AtomicType::new(0),
@@ -47,13 +56,14 @@ fn main() {
         });
     }
 
+    info!("Starting...");
     let iteration_counter = AtomicUsize::new(0);
     loop {
         let finish = Instant::now()
-            .checked_add(Duration::from_secs(5 * 60))
+            .checked_add(Duration::from_secs(validation_seconds))
             .unwrap();
         thread::scope(|scope| {
-            for _ in 0..THREAD_COUNT {
+            for _ in 0..thread_count {
                 scope.spawn(|| {
                     run_rand(&iteration_counter, &mem, &finish);
                 });
